@@ -154,6 +154,29 @@ async function startServer() {
         zip.extractAllTo(siteTempDir, true);
         await fs.remove(file.path);
 
+        // Patch index.html to customize the title and favicon block
+        try {
+          const indexHtmlPath = path.join(siteTempDir, "index.html");
+          if (await fs.pathExists(indexHtmlPath)) {
+            let indexHtml = await fs.readFile(indexHtmlPath, "utf-8");
+            
+            // Replace <title>...</title> with the new site name
+            indexHtml = indexHtml.replace(/<title>.*?<\/title>/s, `<title>${name || slug}</title>`);
+            
+            // Remove any existing favicon
+            indexHtml = indexHtml.replace(/<link[^>]*rel="icon"[^>]*>/g, "");
+            
+            // Insert our custom favicon before </head>
+            const faviconLink = `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%234f46e5%22/><text x=%2250%22 y=%2250%22 font-family=%22sans-serif%22 font-weight=%22bold%22 font-size=%2260%22 fill=%22white%22 text-anchor=%22middle%22 dominant-baseline=%22central%22>${(name || slug).substring(0, 2).toUpperCase()}</text></svg>" />`;
+            indexHtml = indexHtml.replace('</head>', `  ${faviconLink}\n  </head>`);
+            
+            await fs.writeFile(indexHtmlPath, indexHtml, "utf-8");
+            io.emit("build-log", { buildId, log: "Patched index.html with custom title and favicon." });
+          }
+        } catch (e) {
+          io.emit("build-log", { buildId, log: "Could not patch index.html (ignored error)." });
+        }
+
         const runCmd = (cmd: string, args: string[], cwd: string) => {
           return new Promise<void>((resolve, reject) => {
             const proc = spawn(cmd, args, { cwd, shell: true });
