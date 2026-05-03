@@ -1,0 +1,6 @@
+{
+  "name": "Studio Site Builder",
+  "description": "Upload, build, and deploy AI Studio apps to custom slug URLs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

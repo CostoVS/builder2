@@ -1,0 +1,12 @@
+services:
+  builder:
+    build: .
+    container_name: studio-builder
+    restart: always
+    ports:
+      - "3003:3000"
+    volumes:
+      - ./deployed-sites:/app/deployed-sites
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
