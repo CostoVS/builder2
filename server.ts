@@ -85,8 +85,30 @@ async function startServer() {
 
   // API: Get all sites
   app.get("/api/sites", requireAuth, async (req, res) => {
-    const sites = await fs.readJson(SITES_CONFIG_PATH);
-    res.json(sites);
+    try {
+      const sites = await fs.readJson(SITES_CONFIG_PATH);
+      res.json(sites);
+    } catch (e) {
+      res.json([]);
+    }
+  });
+
+  // API: Download site as ZIP
+  app.get("/api/sites/:slug/download", requireAuth, async (req, res) => {
+    const { slug } = req.params;
+    const siteDir = path.join(DEPLOYED_SITES_DIR, slug);
+    
+    if (await fs.pathExists(siteDir)) {
+      const zip = new AdmZip();
+      zip.addLocalFolder(siteDir);
+      const zipBuffer = zip.toBuffer();
+      
+      res.set("Content-Type", "application/zip");
+      res.set("Content-Disposition", `attachment; filename=${slug}.zip`);
+      res.send(zipBuffer);
+    } else {
+      res.status(404).json({ error: "Site not found" });
+    }
   });
 
   // API: Delete site
@@ -157,6 +179,20 @@ async function startServer() {
         }
 
         io.emit("build-step", { buildId, step: "Running npm run build...", status: "running" });
+        
+        // Patch package.json to include base path for Vite
+        try {
+          const pkgPath = path.join(siteTempDir, "package.json");
+          if (await fs.pathExists(pkgPath)) {
+            const pkg = await fs.readJson(pkgPath);
+            if (pkg?.scripts?.build && pkg.scripts.build.includes("vite build") && !pkg.scripts.build.includes("--base")) {
+              pkg.scripts.build = pkg.scripts.build.replace("vite build", `vite build --base=/${slug}/`);
+              await fs.writeJson(pkgPath, pkg, { spaces: 2 });
+              io.emit("build-log", { buildId, log: `Injected --base=/${slug}/ into build script.` });
+            }
+          }
+        } catch(e) {}
+        
         await runCmd("npm", ["run", "build"], siteTempDir);
 
         const distPath = path.join(siteTempDir, "dist");
@@ -190,15 +226,20 @@ async function startServer() {
   });
 
   // Serve deployed sites by slug
-  // This must be BEFORE Vite middleware or index.html serving
   app.get('/:slug*', async (req, res, next) => {
     const slug = req.params.slug;
-    // Skip if it's an API call or Vite internal
-    if (slug === 'api' || slug === '@vite' || slug === 'src' || slug === 'node_modules') {
+    
+    // Safety: ignore core builder paths completely
+    if (['api', 'assets', '@vite', 'src', 'node_modules', 'favicon.ico'].includes(slug)) {
       return next();
     }
 
-    const sites = await fs.readJson(SITES_CONFIG_PATH);
+    // Only intercept if the slug actually exists in our deployments
+    let sites = [];
+    try {
+      sites = await fs.readJson(SITES_CONFIG_PATH);
+    } catch (e) {}
+
     const site = sites.find((s: any) => s.slug === slug);
     
     if (site) {
@@ -212,6 +253,8 @@ async function startServer() {
         return res.sendFile(path.join(DEPLOYED_SITES_DIR, slug, 'index.html'));
       }
     }
+    
+    // If not a valid site, let the main builder app handle it (or show 404)
     next();
   });
 

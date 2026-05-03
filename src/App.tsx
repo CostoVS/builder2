@@ -376,19 +376,25 @@ export default function App() {
                         </td>
                         <td className="px-6 py-4 text-gray-400">{site.name}</td>
                         <td className="px-6 py-4 text-right">
-                          <div className="flex justify-end gap-4">
+                          <div className="flex justify-end gap-5">
                             <a
                               href={site.url}
                               target="_blank"
-                              className="text-gray-400 hover:text-white transition-colors"
+                              className="text-gray-400 hover:text-indigo-400 transition-colors uppercase tracking-widest text-[9px] font-bold"
                             >
-                              VIEW
+                              View
+                            </a>
+                            <a
+                              href={`/api/sites/${site.slug}/download`}
+                              className="text-gray-400 hover:text-emerald-400 transition-colors uppercase tracking-widest text-[9px] font-bold"
+                            >
+                              Zip
                             </a>
                             <button
                               onClick={() => handleDelete(site.slug)}
-                              className="text-red-500/70 hover:text-red-500 transition-colors"
+                              className="text-red-500/70 hover:text-red-500 transition-colors uppercase tracking-widest text-[9px] font-bold"
                             >
-                              DEL
+                              Del
                             </button>
                           </div>
                         </td>
