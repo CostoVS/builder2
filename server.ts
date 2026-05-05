@@ -160,15 +160,22 @@ async function startServer() {
           if (await fs.pathExists(indexHtmlPath)) {
             let indexHtml = await fs.readFile(indexHtmlPath, "utf-8");
             
-            // Replace <title>...</title> with the new site name
-            indexHtml = indexHtml.replace(/<title>.*?<\/title>/s, `<title>${name || slug}</title>`);
+            const siteTitle = name || slug;
+            const init = siteTitle.substring(0, 2).toUpperCase();
             
-            // Remove any existing favicon
-            indexHtml = indexHtml.replace(/<link[^>]*rel="icon"[^>]*>/g, "");
+            // Replace <title>...</title> with the new site name, or add it if missing
+            if (/<title>.*?<\/title>/is.test(indexHtml)) {
+              indexHtml = indexHtml.replace(/<title>.*?<\/title>/is, `<title>${siteTitle}</title>`);
+            } else {
+              indexHtml = indexHtml.replace(/<head>/i, `<head>\n    <title>${siteTitle}</title>`);
+            }
             
-            // Insert our custom favicon before </head>
-            const faviconLink = `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%234f46e5%22/><text x=%2250%22 y=%2250%22 font-family=%22sans-serif%22 font-weight=%22bold%22 font-size=%2260%22 fill=%22white%22 text-anchor=%22middle%22 dominant-baseline=%22central%22>${(name || slug).substring(0, 2).toUpperCase()}</text></svg>" />`;
-            indexHtml = indexHtml.replace('</head>', `  ${faviconLink}\n  </head>`);
+            // Remove any existing favicons
+            indexHtml = indexHtml.replace(/<link[^>]*rel=["']?(?:shortcut )?icon["']?[^>]*>/gi, "");
+            
+            // Insert our custom favicon just before </head>
+            const faviconLink = `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%234f46e5%22/><text x=%2250%22 y=%2250%22 font-family=%22sans-serif%22 font-weight=%22bold%22 font-size=%2260%22 fill=%22white%22 text-anchor=%22middle%22 dominant-baseline=%22central%22>${init}</text></svg>" />`;
+            indexHtml = indexHtml.replace(/<\/head>/i, `  ${faviconLink}\n  </head>`);
             
             await fs.writeFile(indexHtmlPath, indexHtml, "utf-8");
             io.emit("build-log", { buildId, log: "Patched index.html with custom title and favicon." });
@@ -203,6 +210,36 @@ async function startServer() {
 
         io.emit("build-step", { buildId, step: "Running npm run build...", status: "running" });
         
+        // Patch React Router and Wouter basename if needed
+        try {
+          const sourceFiles = [
+            path.join(siteTempDir, "src", "main.tsx"),
+            path.join(siteTempDir, "src", "main.jsx"),
+            path.join(siteTempDir, "src", "App.tsx"),
+            path.join(siteTempDir, "src", "App.jsx")
+          ];
+          for (const p of sourceFiles) {
+            if (await fs.pathExists(p)) {
+              let content = await fs.readFile(p, "utf-8");
+              let patched = false;
+              
+              if (content.includes("<BrowserRouter>") && !content.includes("basename=")) {
+                content = content.replace(/<BrowserRouter>/g, `<BrowserRouter basename="/${slug}/">`);
+                patched = true;
+              }
+              if (content.includes("<Router>") && content.includes("wouter") && !content.includes("base=")) {
+                content = content.replace(/<Router>/g, `<Router base="/${slug}/">`);
+                patched = true;
+              }
+              
+              if (patched) {
+                await fs.writeFile(p, content, "utf-8");
+                io.emit("build-log", { buildId, log: `Injected basename into Router in ${path.basename(p)}.` });
+              }
+            }
+          }
+        } catch(e) {}
+
         // Patch package.json to include base path for Vite
         try {
           const pkgPath = path.join(siteTempDir, "package.json");
@@ -212,6 +249,25 @@ async function startServer() {
               pkg.scripts.build = pkg.scripts.build.replace("vite build", `vite build --base=/${slug}/`);
               await fs.writeJson(pkgPath, pkg, { spaces: 2 });
               io.emit("build-log", { buildId, log: `Injected --base=/${slug}/ into build script.` });
+            }
+          }
+        } catch(e) {}
+        
+        // Patch vite.config.ts to inject base path
+        try {
+          const viteConfigPath = path.join(siteTempDir, "vite.config.ts");
+          if (await fs.pathExists(viteConfigPath)) {
+            let configContent = await fs.readFile(viteConfigPath, "utf-8");
+            
+            // Very simple patch: if base is not defined, try to inject it into the defineConfig object
+            if (!configContent.includes("base:") && !configContent.includes('base:')) {
+              // Look for defineConfig({
+              const replaceTarget = "defineConfig({";
+              if (configContent.includes(replaceTarget)) {
+                configContent = configContent.replace(replaceTarget, `defineConfig({\n  base: '/${slug}/',`);
+                await fs.writeFile(viteConfigPath, configContent, "utf-8");
+                io.emit("build-log", { buildId, log: "Injected base: '/${slug}/' into vite.config.ts." });
+              }
             }
           }
         } catch(e) {}
